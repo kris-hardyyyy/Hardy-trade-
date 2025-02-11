@@ -1,40 +1,36 @@
-name: CI
+name: Deploy TA-Lib Project
 
 on:
   push:
-    branches:
-      - main
-  pull_request:
     branches:
       - main
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v2
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential python3-dev libta-lib-dev
 
       - name: Install TA-Lib
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ta-lib
+          pip install --no-cache-dir ta-lib
 
-      - name: Setup Python 3.8
-        uses: actions/setup-python@v2
-        with:
-          python-version: '3.8'
-
-      - name: Install Python Dependencies
+      - name: Install other dependencies
         run: |
-          python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install ta-lib
 
-      - name: Verify TA-Lib Installation
+      - name: Run your script
         run: |
-          python -c "import talib; print(talib.get_version())"
-
-      - name: Check Syntax
-        run: python -m compileall .
-```
+          python your_script.py
