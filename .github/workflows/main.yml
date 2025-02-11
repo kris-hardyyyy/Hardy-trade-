@@ -1,16 +1,13 @@
-name: Python CI with TA-Lib
+name: Python CI with TA-Lib (MacOS)
 
 on:
   push:
     branches:
       - main
-  pull_request:
-    branches:
-      - main
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
 
     steps:
       - name: Checkout repository
@@ -23,8 +20,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libta-lib0 libta-lib-dev
+          brew install ta-lib
           pip install --upgrade pip
           pip install --no-cache-dir ta-lib -r requirements.txt
 
