@@ -1,8 +1,8 @@
-ccxt>=1.99.0
-TA-Lib>=0.4.0
-pandas>=1.0.0
-python-telegram-bot==13.15
-Pillow>=8.0.0
-numpy>=1.18.0
-tensorflow>=2.0.0
-opencv-python>=4.0.0
+ccxt
+TA-Lib
+pandas
+python-telegram-bot
+Pillow
+numpy
+tensorflow
+opencv-python
