@@ -70,7 +70,6 @@ class HedgeFundGradeAnalyzer:
 
     def _fetch_ohlcv(self, symbol: str, timeframe: str) -> pd.DataFrame:
         # Use CryptoCompare's API to fetch historical data.
-        # Map symbol (e.g. "BTC/USDT") to base symbol (e.g. "BTC")
         base = symbol.split("/")[0]
         if timeframe == "1h":
             url = f"https://min-api.cryptocompare.com/data/v2/histohour?fsym={base}&tsym=USDT&limit=500"
@@ -342,22 +341,22 @@ class HardlyTradeAnalystBot:
 📈 *{symbol} Professional Analysis* 📉
 
 ⏰ *Timeframe Consensus*:
-- Short-term (1H): {analysis['1h']['trend']}
-- Medium-term (4H): {analysis['4h']['trend']}
-- Long-term (1D): {analysis['1d']['trend']}
+• Short-term (1H): {analysis['1h']['trend']}
+• Medium-term (4H): {analysis['4h']['trend']}
+• Long-term (1D): {analysis['1d']['trend']}
 
 🎯 *Key Levels*:
-- Support: ${analysis['consensus']['support']:,.2f}
-- Resistance: ${analysis['consensus']['resistance']:,.2f}
-- Pivot Point: ${analysis['consensus']['pivot']:,.2f}
+• Support: ${analysis['consensus']['support']:,.2f}
+• Resistance: ${analysis['consensus']['resistance']:,.2f}
+• Pivot Point: ${analysis['consensus']['pivot']:,.2f}
 
 💹 *Momentum*:
-- RSI: {analysis['consensus']['rsi']:.1f} ({'Overbought' if analysis['consensus']['rsi'] > 70 else 'Oversold'})
-- MACD: {'Bullish' if analysis['consensus']['macd'] > 0 else 'Bearish'}
+• RSI: {analysis['consensus']['rsi']:.1f} ({'Overbought' if analysis['consensus']['rsi'] > 70 else 'Oversold'})
+• MACD: {'Bullish' if analysis['consensus']['macd'] > 0 else 'Bearish'}
 
 📊 *Volume Analysis*:
-- Recent Volume Spike: {'Yes' if analysis['consensus']['volume_spike'] else 'No'}
-- Volume Trend: {analysis['consensus']['volume_trend']}
+• Recent Volume Spike: {'Yes' if analysis['consensus']['volume_spike'] else 'No'}
+• Volume Trend: {analysis['consensus']['volume_trend']}
 
 🔔 *Professional Recommendation*:
 {self._generate_recommendation(analysis)}
@@ -388,8 +387,8 @@ class HardlyTradeAnalystBot:
 📊 *Professional Chart Analysis* 📊
 
 🔍 *Detected Patterns*:
-- Primary Pattern: {analysis['primary_pattern']} ({analysis['confidence']:.1%} confidence)
-- Secondary Indications: {', '.join(analysis['secondary_patterns'][:2])}
+• Primary Pattern: {analysis['primary_pattern']} ({analysis['confidence']:.1%} confidence)
+• Secondary Indications: {', '.join(analysis['secondary_patterns'][:2])}
 
 💡 *Institutional Interpretation*:
 {self._get_pattern_interpretation(analysis['primary_pattern'])}
