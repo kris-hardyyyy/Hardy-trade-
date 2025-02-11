@@ -26,18 +26,27 @@ import tensorflow as tf
 import cv2
 
 # ============================
+# HELPER FUNCTION FOR MARKDOWN ESCAPING
+# ============================
+def escape_markdown_v2(text: str) -> str:
+    """
+    Escapes all reserved characters in Telegram MarkdownV2.
+    Reserved characters: _ * [ ] ( ) ~ ` > # + - = | { } . !
+    """
+    escape_chars = r'_*\[\]()~`>#+\-=|{}.!'
+    for ch in escape_chars:
+        text = text.replace(ch, f"\\{ch}")
+    return text
+
+# ============================
 # CONFIGURATION (Public Mode)
 # ============================
 SUPPORTED_SYMBOLS = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "DOGE/USDT", "TRUMP/USDT", "SHIB/USDT"]
 
 # ----------------------------
-# Utility: Current Price Fetcher
+# Utility: Current Price Fetcher using CryptoCompare
 # ----------------------------
 def get_current_price(symbol: str) -> float:
-    """
-    Uses CryptoCompare's price endpoint to fetch the current price.
-    Example URL: https://min-api.cryptocompare.com/data/price?fsym=BTC&tsyms=USDT
-    """
     base = symbol.split("/")[0]
     url = f"https://min-api.cryptocompare.com/data/price?fsym={base}&tsyms=USDT"
     response = requests.get(url)
@@ -69,7 +78,6 @@ class HedgeFundGradeAnalyzer:
         return analysis
 
     def _fetch_ohlcv(self, symbol: str, timeframe: str) -> pd.DataFrame:
-        # Use CryptoCompare's API to fetch historical data.
         base = symbol.split("/")[0]
         if timeframe == "1h":
             url = f"https://min-api.cryptocompare.com/data/v2/histohour?fsym={base}&tsym=USDT&limit=500"
@@ -88,7 +96,6 @@ class HedgeFundGradeAnalyzer:
             df = df[["timestamp", "open", "high", "low", "close", "volumeto"]].rename(columns={"volumeto": "volume"})
             return df
         elif timeframe == "4h":
-            # Fetch hourly data and aggregate into 4-hour candles.
             url = f"https://min-api.cryptocompare.com/data/v2/histohour?fsym={base}&tsym=USDT&limit=500"
             r = requests.get(url)
             data = r.json()
@@ -195,14 +202,14 @@ async def start_command(update: Update, context: CallbackContext):
         "• Use /alert [symbol] [price] [above/below] to set a price alert.\n\n"
         "Enjoy your analysis and happy trading! 🚀"
     )
-    await update.message.reply_markdown_v2(welcome_text)
+    await update.message.reply_markdown_v2(escape_markdown_v2(welcome_text))
 
 async def analyze_command(update: Update, context: CallbackContext):
     symbol = context.args[0].upper() + "/USDT" if context.args else "BTC/USDT"
     bot_instance = HardlyTradeAnalystBot()
     try:
         report = bot_instance.generate_report(symbol)
-        await update.message.reply_markdown_v2(report)
+        await update.message.reply_markdown_v2(escape_markdown_v2(report))
     except Exception as e:
         await update.message.reply_text(f"⚠️ Oops! An error occurred: {str(e)}")
 
@@ -223,7 +230,7 @@ async def portfolio_command(update: Update, context: CallbackContext):
                 f"🛑 SL: ${data['stop_loss']:.2f}\n"
                 f"🎯 TP: ${data['take_profit']:.2f}\n"
             )
-    await update.message.reply_markdown_v2(response)
+    await update.message.reply_markdown_v2(escape_markdown_v2(response))
 
 async def alert_handler(update: Update, context: CallbackContext):
     args = context.args
@@ -430,7 +437,7 @@ async def handle_screenshot(update: Update, context: CallbackContext):
         bot_instance = HardlyTradeAnalystBot()
         analysis = bot_instance.chart_analyzer.analyze_screenshot(temp_path)
         report = bot_instance.generate_image_report(analysis)
-        await update.message.reply_markdown_v2(report)
+        await update.message.reply_markdown_v2(escape_markdown_v2(report))
     except Exception as e:
         await update.message.reply_text(f"🚨 Professional Analysis Failed: {str(e)}")
     finally:
@@ -441,7 +448,7 @@ async def handle_screenshot(update: Update, context: CallbackContext):
 # MAIN SETUP
 # ============================
 def main():
-    application = ApplicationBuilder().token("7277532789:AAGS5v9K6if3ZrLen8fa2ABRovn25Sazpk8").build()
+    application = ApplicationBuilder().token("YOUR_TELEGRAM_BOT_TOKEN").build()
 
     # Register command handlers
     application.add_handler(CommandHandler("start", start_command))
@@ -457,3 +464,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
