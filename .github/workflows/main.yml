@@ -2,31 +2,23 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
   pull_request:
-    branches: [ main ]
+    branches:
+      - main
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout Code
         uses: actions/checkout@v2
 
-      - name: Install Build Tools & Dependencies
+      - name: Install TA-Lib
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential wget
-
-      - name: Build and Install TA-Lib from Source
-        run: |
-          wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz
-          tar -xvf ta-lib-0.4.0-src.tar.gz
-          cd ta-lib
-          ./configure --prefix=/usr
-          make
-          sudo make install
+          sudo apt-get install -y ta-lib
 
       - name: Setup Python 3.8
         uses: actions/setup-python@v2
@@ -37,11 +29,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip install ta-lib
+
+      - name: Verify TA-Lib Installation
+        run: |
+          python -c "import talib; print(talib.get_version())"
 
       - name: Check Syntax
         run: python -m compileall .
-
-      # Uncomment if you add tests later:
-      # - name: Run Tests
-      #   run: pytest
-      
+```
