@@ -1,15 +1,16 @@
 import logging
-import ccxt
 import talib
 import pandas as pd
+import requests
+import numpy as np
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Updater,
     CommandHandler,
     MessageHandler,
     CallbackContext,
     CallbackQueryHandler,
     filters,
+    ApplicationBuilder,
 )
 from datetime import datetime, timedelta
 import threading
@@ -18,19 +19,30 @@ import urllib.parse
 import hashlib
 import hmac
 import base64
-import requests
-import numpy as np
+import os
+import tempfile
 from PIL import Image
 import tensorflow as tf
 import cv2
-import os
-import tempfile
 
 # ============================
 # CONFIGURATION (Public Mode)
 # ============================
-EXCHANGE = ccxt.binance({"enableRateLimit": True})
 SUPPORTED_SYMBOLS = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "DOGE/USDT", "TRUMP/USDT", "SHIB/USDT"]
+
+# ----------------------------
+# Utility: Current Price Fetcher
+# ----------------------------
+def get_current_price(symbol: str) -> float:
+    """
+    Uses CryptoCompare's price endpoint to fetch the current price.
+    Example URL: https://min-api.cryptocompare.com/data/price?fsym=BTC&tsyms=USDT
+    """
+    base = symbol.split("/")[0]
+    url = f"https://min-api.cryptocompare.com/data/price?fsym={base}&tsyms=USDT"
+    response = requests.get(url)
+    data = response.json()
+    return data["USDT"]
 
 # ============================
 # PROFESSIONAL ANALYSIS ENGINE
@@ -57,12 +69,44 @@ class HedgeFundGradeAnalyzer:
         return analysis
 
     def _fetch_ohlcv(self, symbol: str, timeframe: str) -> pd.DataFrame:
-        if symbol not in SUPPORTED_SYMBOLS:
-            raise ValueError(f"Unsupported symbol: {symbol}")
-        data = EXCHANGE.fetch_ohlcv(symbol, timeframe, limit=500)
-        df = pd.DataFrame(data, columns=["timestamp", "open", "high", "low", "close", "volume"])
-        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
-        return df
+        # Use CryptoCompare's API to fetch historical data.
+        # Map symbol (e.g. "BTC/USDT") to base symbol (e.g. "BTC")
+        base = symbol.split("/")[0]
+        if timeframe == "1h":
+            url = f"https://min-api.cryptocompare.com/data/v2/histohour?fsym={base}&tsym=USDT&limit=500"
+            r = requests.get(url)
+            data = r.json()
+            df = pd.DataFrame(data["Data"]["Data"])
+            df["timestamp"] = pd.to_datetime(df["time"], unit="s")
+            df = df[["timestamp", "open", "high", "low", "close", "volumeto"]].rename(columns={"volumeto": "volume"})
+            return df
+        elif timeframe == "1d":
+            url = f"https://min-api.cryptocompare.com/data/v2/histoday?fsym={base}&tsym=USDT&limit=500"
+            r = requests.get(url)
+            data = r.json()
+            df = pd.DataFrame(data["Data"]["Data"])
+            df["timestamp"] = pd.to_datetime(df["time"], unit="s")
+            df = df[["timestamp", "open", "high", "low", "close", "volumeto"]].rename(columns={"volumeto": "volume"})
+            return df
+        elif timeframe == "4h":
+            # Fetch hourly data and aggregate into 4-hour candles.
+            url = f"https://min-api.cryptocompare.com/data/v2/histohour?fsym={base}&tsym=USDT&limit=500"
+            r = requests.get(url)
+            data = r.json()
+            df = pd.DataFrame(data["Data"]["Data"])
+            df["timestamp"] = pd.to_datetime(df["time"], unit="s")
+            df.set_index("timestamp", inplace=True)
+            df_4h = df.resample("4H").agg({
+                "open": "first",
+                "high": "max",
+                "low": "min",
+                "close": "last",
+                "volumeto": "sum"
+            }).dropna().reset_index()
+            df_4h = df_4h.rename(columns={"volumeto": "volume"})
+            return df_4h
+        else:
+            raise ValueError("Unsupported timeframe")
 
     def _calculate_key_levels(self, df: pd.DataFrame) -> dict:
         support = df["low"].rolling(50).min().iloc[-1]
@@ -145,7 +189,7 @@ class PortfolioManager:
 async def start_command(update: Update, context: CallbackContext):
     welcome_text = (
         "👋 Welcome to *Hardly trade analyst 💎📈*!\n\n"
-        "This bot provides professional-grade market analysis using public Binance data. "
+        "This bot provides professional-grade market analysis using public CryptoCompare data. "
         "You can:\n"
         "• Use /analyze [symbol] to get a detailed technical analysis report (e.g. /analyze BTC).\n"
         "• Use /portfolio to view your simulated portfolio (for demonstration purposes).\n"
@@ -171,7 +215,7 @@ async def portfolio_command(update: Update, context: CallbackContext):
         response += "\nYour portfolio is empty. Add some positions (simulation only)!"
     else:
         for sym, data in positions.items():
-            current_price = EXCHANGE.fetch_ticker(sym)["last"]
+            current_price = get_current_price(sym)
             pnl = (current_price / data["entry"] - 1) * 100
             response += (
                 f"\n{sym}:\n"
@@ -205,8 +249,7 @@ def check_price_alerts(context: CallbackContext):
         keys = list(context.bot_data.keys())
         for key in keys:
             alert = context.bot_data[key]
-            ticker = EXCHANGE.fetch_ticker(alert["symbol"])
-            current_price = ticker["last"]
+            current_price = get_current_price(alert["symbol"])
             if alert["condition"] == "above" and current_price > alert["price"]:
                 context.bot.send_message(
                     chat_id=alert["chat_id"],
@@ -399,7 +442,6 @@ async def handle_screenshot(update: Update, context: CallbackContext):
 # MAIN SETUP
 # ============================
 def main():
-    from telegram.ext import ApplicationBuilder
     application = ApplicationBuilder().token("7277532789:AAGS5v9K6if3ZrLen8fa2ABRovn25Sazpk8").build()
 
     # Register command handlers
