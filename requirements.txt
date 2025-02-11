@@ -1,8 +1,10 @@
+numpy
+pandas
 ccxt
 TA-Lib
-pandas
 python-telegram-bot
-Pillow
-numpy
 tensorflow
 opencv-python
+Pillow
+requests
+logging
