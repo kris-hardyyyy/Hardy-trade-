@@ -1,7 +1,10 @@
-name: Deploy TA-Lib Project
+name: Python CI with TA-Lib
 
 on:
   push:
+    branches:
+      - main
+  pull_request:
     branches:
       - main
 
@@ -11,37 +14,19 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.10"
+          python-version: "3.9"
 
-      - name: Install required dependencies
+      - name: Install dependencies
         run: |
-          sudo apt update
-          sudo apt install -y build-essential python3-dev wget tar
+          sudo apt-get update
+          sudo apt-get install -y libta-lib0 libta-lib-dev
+          pip install --upgrade pip
+          pip install --no-cache-dir ta-lib -r requirements.txt
 
-      - name: Manually build and install TA-Lib
-        run: |
-          wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz
-          tar -xzf ta-lib-0.4.0-src.tar.gz
-          cd ta-lib
-          ./configure --prefix=/usr
-          make
-          sudo make install
-          cd ..
-          rm -rf ta-lib ta-lib-0.4.0-src.tar.gz
-
-      - name: Install TA-Lib Python wrapper
-        run: |
-          pip install --no-cache-dir ta-lib
-
-      - name: Install other dependencies
-        run: |
-          pip install -r requirements.txt
-
-      - name: Run your script
-        run: |
-          python your_script.py
+      - name: Run Python script
+        run: python main.py  # Replace with your script name
