@@ -1,174 +1,133 @@
-import time
-import datetime
-import requests
-import sqlite3
 import numpy as np
-import matplotlib.pyplot as plt
-import glob
-import os
-import logging
-from collections import defaultdict
-from functools import lru_cache
-from joblib import load
-from tensorflow.keras.models import load_model
+import pickle
+import tensorflow as tf
+import requests
+from keras.models import load_model
 from sklearn.preprocessing import MinMaxScaler
+from joblib import load
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackContext
+from telegram.ext import Updater, CommandHandler, CallbackContext
 
-# ✅ Enable Logging
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+# 🔹 **Load Models & Scaler**
+LSTM_MODEL_PATH = "/mnt/data/lstm_model.h5"
+XGB_MODEL_PATH = "/mnt/data/xgb_model.pkl"
+SCALER_PATH = "/mnt/data/scaler.pkl"
 
-# ✅ Load AI Models & Pre-trained Scaler
-MODEL_VERSION = "1.2"
-lstm_model = load_model("lstm_model.h5")
-xgb_model = load("xgb_model.pkl")
-scaler = load("scaler.pkl")  # Load pre-trained scaler
+# Load LSTM Model
+lstm_model = load_model(LSTM_MODEL_PATH)
 
-# ✅ Database Setup
-conn = sqlite3.connect("bot_data.db", check_same_thread=False)
-c = conn.cursor()
-c.execute("""
-    CREATE TABLE IF NOT EXISTS alerts (
-        chat_id INTEGER, 
-        symbol TEXT, 
-        condition TEXT, 
-        price REAL, 
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-""")
-conn.commit()
+# Load XGBoost Model
+with open(XGB_MODEL_PATH, "rb") as f:
+    xgb_model = pickle.load(f)
 
-# ✅ Rate Limiter
-RATE_LIMIT = 5
-class RateLimiter:
-    def __init__(self):
-        self.user_commands = defaultdict(list)
+# Load Scaler
+scaler = load(SCALER_PATH)
 
-    def check_rate_limit(self, update: Update):
-        user_id = update.effective_user.id
-        now = time.time()
-        self.user_commands[user_id] = [t for t in self.user_commands[user_id] if now - t < 60]
-        if len(self.user_commands[user_id]) >= RATE_LIMIT:
-            update.message.reply_text("⚠️ Rate limit exceeded. Please wait 1 minute.")
-            raise DispatcherHandlerStop()
-        self.user_commands[user_id].append(now)
-
-rate_limiter = RateLimiter()
-
-# ✅ Fetch Historical Crypto Prices
+# 🔹 **Function to Get Historical Prices**
 def get_historical_prices(symbol, days=60):
+    """
+    Fetches the last `days` of price data for a given crypto symbol.
+    """
     url = f"https://api.coingecko.com/api/v3/coins/{symbol}/market_chart?vs_currency=usd&days={days}"
     try:
         response = requests.get(url, timeout=5)
         response.raise_for_status()
         data = response.json()
-        return [x[1] for x in data.get("prices", [])][-60:]  # Last 60 points
-    except requests.RequestException as e:
-        logger.error(f"Historical Data Error: {e}")
-        return None
-
-# ✅ Fetch Real-Time Price (Cached)
-@lru_cache(maxsize=32)
-def get_real_time_price(symbol):
-    url = f"https://api.coingecko.com/api/v3/simple/price?ids={symbol}&vs_currencies=usd"
-    try:
-        response = requests.get(url, timeout=5)
-        response.raise_for_status()
-        data = response.json()
-        return float(data.get(symbol, {}).get("usd", None))
+        return [price[1] for price in data["prices"]]
     except Exception as e:
-        logger.error(f"Price API Error: {e}")
+        print(f"⚠️ Error fetching historical prices: {e}")
         return None
 
-# ✅ Generate Price Charts
-def generate_chart(symbol):
-    url = f"https://api.coingecko.com/api/v3/coins/{symbol}/market_chart?vs_currency=usd&days=60"
-    try:
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        timestamps = [x[0] for x in data["prices"]]
-        prices = [x[1] for x in data["prices"]]
-        dates = [datetime.datetime.fromtimestamp(ts / 1000) for ts in timestamps]
+# 🔹 **Function to Preprocess Data**
+def preprocess_data(historical_prices):
+    """
+    Prepares historical price data for the LSTM and XGBoost models.
+    """
+    if len(historical_prices) < 60:
+        return None, None  # Need at least 60 data points
 
-        plt.figure(figsize=(12, 6))
-        plt.plot(dates, prices, label="Price", color='blue')
-        plt.title(f"{symbol.upper()} Price Chart 📈")
-        plt.xlabel("Date")
-        plt.ylabel("Price (USD) 💰")
-        plt.legend()
-        plt.gcf().autofmt_xdate()
+    # Normalize prices
+    scaled_data = scaler.transform(np.array(historical_prices).reshape(-1, 1))
 
-        filename = f"chart_{symbol}_{int(time.time())}.png"
-        plt.savefig(filename)
-        plt.close()
-        return filename
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Chart Error: {e}")
-        return None
+    # LSTM expects 3D input: (samples, timesteps, features)
+    lstm_input = np.array([scaled_data[-60:]]).reshape(1, 60, 1)
 
-# ✅ AI-Based Prediction System
-def predict_next_price(symbol):
-    historical = get_historical_prices(symbol)
-    if historical is None or len(historical) < 60:
-        return None
+    # XGBoost expects 2D input: (samples, features)
+    xgb_input = scaled_data[-60:].flatten().reshape(1, -1)
 
-    scaled_data = scaler.transform(np.array(historical).reshape(-1, 1))
-    lstm_input = scaled_data.reshape(1, 60, 1)
-    xgb_input = scaled_data.flatten().reshape(1, -1)
+    return lstm_input, xgb_input
 
+# 🔹 **Function to Predict Next Price**
+def predict_next_price(symbol, historical_prices):
+    """
+    Predicts the next price using both LSTM and XGBoost models.
+    """
+    lstm_input, xgb_input = preprocess_data(historical_prices)
+    if lstm_input is None or xgb_input is None:
+        return "⚠️ Not enough historical data (60+ data points required)."
+
+    # LSTM Prediction
     lstm_pred = lstm_model.predict(lstm_input)
-    xgb_pred = xgb_model.predict(xgb_input)
-
     lstm_price = scaler.inverse_transform(lstm_pred)[0][0]
+
+    # XGBoost Prediction
+    xgb_pred = xgb_model.predict(xgb_input)
     xgb_price = scaler.inverse_transform(xgb_pred.reshape(-1, 1))[0][0]
 
+    # Combine results
     final_pred = (lstm_price + xgb_price) / 2
 
     return {
-        "final": final_pred,
-        "confidence": {
-            "lstm": f"±{np.std(lstm_pred):.2f}",
-            "xgb": f"±{np.std(xgb_pred):.2f}"
-        }
+        "lstm_price": round(lstm_price, 2),
+        "xgb_price": round(xgb_price, 2),
+        "final_pred": round(final_pred, 2),
     }
 
-# ✅ Set Alert
-def set_alert(chat_id, symbol, condition, price):
-    c.execute("INSERT INTO alerts (chat_id, symbol, condition, price) VALUES (?, ?, ?, ?)",
-              (chat_id, symbol, condition, price))
-    conn.commit()
-    return "✅ Alert set successfully!"
+# 🔹 **Telegram Bot Command for Prediction**
+def predict_command(update: Update, context: CallbackContext):
+    """
+    Telegram bot command to predict the next crypto price.
+    Usage: /predict bitcoin
+    """
+    if len(context.args) < 1:
+        update.message.reply_text("⚠️ Please provide a symbol! Example: /predict bitcoin")
+        return
 
-# ✅ Telegram Bot Commands
-async def start(update: Update, context: CallbackContext):
-    await update.message.reply_text("👋 Welcome! Use /price <crypto> to get real-time prices or /predict <crypto> for AI predictions!")
-
-async def price(update: Update, context: CallbackContext):
     symbol = context.args[0].lower()
-    price = get_real_time_price(symbol)
-    if price:
-        await update.message.reply_text(f"💰 {symbol.upper()} Price: ${price}")
+    historical_prices = get_historical_prices(symbol)
+
+    if historical_prices is None:
+        update.message.reply_text("⚠️ Failed to fetch historical data. Try again later.")
+        return
+
+    prediction = predict_next_price(symbol, historical_prices)
+
+    if isinstance(prediction, str):
+        update.message.reply_text(prediction)
     else:
-        await update.message.reply_text("⚠️ Invalid symbol!")
+        response = (
+            f"📊 *Price Prediction for {symbol.upper()}* 📊\n"
+            f"🔹 *LSTM Model:* ${prediction['lstm_price']}\n"
+            f"🔹 *XGBoost Model:* ${prediction['xgb_price']}\n"
+            f"✨ *Final Prediction:* ${prediction['final_pred']}\n"
+        )
+        update.message.reply_text(response, parse_mode="Markdown")
 
-async def predict(update: Update, context: CallbackContext):
-    symbol = context.args[0].lower()
-    result = predict_next_price(symbol)
-    if result:
-        await update.message.reply_text(f"📈 Predicted Price: ${result['final']:.2f}\n🔹 Confidence: LSTM {result['confidence']['lstm']}, XGB {result['confidence']['xgb']}")
-    else:
-        await update.message.reply_text("⚠️ Unable to fetch historical data!")
+# 🔹 **Setup Telegram Bot**
+def main():
+    """
+    Main function to run the Telegram bot.
+    """
+    TOKEN = "7277532789:AAGS5v9K6if3ZrLen8fa2ABRovn25Sazpk8"  # 🔴 Replace with your bot token
+    updater = Updater(TOKEN, use_context=True)
+    dispatcher = updater.dispatcher
 
-# ✅ Async Telegram Bot
-app = ApplicationBuilder().token("7277532789:AAGS5v9K6if3ZrLen8fa2ABRovn25Sazpk8").build()
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("price", price))
-app.add_handler(CommandHandler("predict", predict))
+    # Add command handlers
+    dispatcher.add_handler(CommandHandler("predict", predict_command))
 
-logger.info("🚀 Bot is running...")
-app.run_polling()
+    # Start the bot
+    updater.start_polling()
+    updater.idle()
+
+if __name__ == "__main__":
+    main()
