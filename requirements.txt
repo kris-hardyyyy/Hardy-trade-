@@ -1,7 +1,9 @@
 tensorflow
-keras
 xgboost
-scikit-learn
-python-telegram-bot
+numpy
+pandas
 requests
-joblib
+opencv-python
+pytesseract
+tenacity
+python-telegram-bot
