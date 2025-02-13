@@ -1,14 +1,15 @@
-name: Telegram AI Bot Deployment
+name: Python CI
 
 on:
   push:
     branches:
-      - main  # Runs the workflow when changes are pushed to main
-
-  workflow_dispatch:  # Allows manual trigger from GitHub Actions UI
+      - main
+  pull_request:
+    branches:
+      - main
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
 
     steps:
@@ -18,20 +19,22 @@ jobs:
       - name: 🔹 Set Up Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.10"
+          python-version: '3.10'
 
       - name: 🔹 Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt  # Ensure this file lists all dependencies
-
-      - name: 🔹 Set Up Telegram Bot Token
-        run: echo "TELEGRAM_BOT_TOKEN=7277532789:AAGS5v9K6if3ZrLen8fa2ABRovn25Sazpk8" >> $GITHUB_ENV
+          pip install -r requirements.txt
 
       - name: 🔹 Run Unit Tests (Optional)
         run: |
-          python -m unittest discover -s tests  # If you have test scripts
+          if [ -d "tests" ] && [ "$(ls -A tests)" ]; then
+            python -m unittest discover -s tests
+          else
+            echo "⚠️ No tests found, skipping..."
+          fi
 
-      - name: 🔹 Deploy Bot
+      - name: 🔹 Lint Code with Flake8
         run: |
-          python bot.py &  # Starts the bot in the background
+          pip install flake8
+          flake8 . --count --show-source --statistics
