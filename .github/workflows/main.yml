@@ -25,10 +25,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt  # Ensure this file lists all dependencies
 
-      - name: 🔹 Set Up Environment Variables
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.7277532789:AAGS5v9K6if3ZrLen8fa2ABRovn25Sazpk8 }}
-        run: echo "Environment variables set"
+      - name: 🔹 Set Up Telegram Bot Token
+        run: echo "TELEGRAM_BOT_TOKEN=7277532789:AAGS5v9K6if3ZrLen8fa2ABRovn25Sazpk8" >> $GITHUB_ENV
 
       - name: 🔹 Run Unit Tests (Optional)
         run: |
@@ -36,4 +34,4 @@ jobs:
 
       - name: 🔹 Deploy Bot
         run: |
-          python main.py &  # Starts the bot in the background
+          python bot.py &  # Starts the bot in the background
