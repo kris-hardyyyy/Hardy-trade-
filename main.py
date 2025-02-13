@@ -1,17 +1,28 @@
+import os
 import numpy as np
-import pickle
-import tensorflow as tf
 import requests
+import pickle
+import joblib
+import tensorflow as tf
 from keras.models import load_model
 from sklearn.preprocessing import MinMaxScaler
-from joblib import load
 from telegram import Update
-from telegram.ext import Updater, CommandHandler, CallbackContext
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackContext
 
-# 🔹 **Load Models & Scaler**
-LSTM_MODEL_PATH = "/mnt/data/lstm_model.h5"
-XGB_MODEL_PATH = "/mnt/data/xgb_model.pkl"
-SCALER_PATH = "/mnt/data/scaler.pkl"
+# === Load Pre-trained Models === #
+LSTM_MODEL_PATH = "lstm_model.h5"
+XGB_MODEL_PATH = "xgb_model.pkl"
+SCALER_PATH = "scaler.pkl"
+
+# Ensure all models exist before proceeding
+if not os.path.exists(LSTM_MODEL_PATH):
+    raise FileNotFoundError(f"❌ Missing {LSTM_MODEL_PATH}")
+
+if not os.path.exists(XGB_MODEL_PATH):
+    raise FileNotFoundError(f"❌ Missing {XGB_MODEL_PATH}")
+
+if not os.path.exists(SCALER_PATH):
+    raise FileNotFoundError(f"❌ Missing {SCALER_PATH}")
 
 # Load LSTM Model
 lstm_model = load_model(LSTM_MODEL_PATH)
@@ -21,113 +32,67 @@ with open(XGB_MODEL_PATH, "rb") as f:
     xgb_model = pickle.load(f)
 
 # Load Scaler
-scaler = load(SCALER_PATH)
+scaler = joblib.load(SCALER_PATH)
 
-# 🔹 **Function to Get Historical Prices**
+# === Fetch Historical Prices === #
 def get_historical_prices(symbol, days=60):
-    """
-    Fetches the last `days` of price data for a given crypto symbol.
-    """
     url = f"https://api.coingecko.com/api/v3/coins/{symbol}/market_chart?vs_currency=usd&days={days}"
     try:
-        response = requests.get(url, timeout=5)
+        response = requests.get(url, timeout=10)
         response.raise_for_status()
         data = response.json()
-        return [price[1] for price in data["prices"]]
+        prices = [item[1] for item in data.get("prices", [])]
+        return prices if len(prices) == days else None
     except Exception as e:
         print(f"⚠️ Error fetching historical prices: {e}")
         return None
 
-# 🔹 **Function to Preprocess Data**
-def preprocess_data(historical_prices):
-    """
-    Prepares historical price data for the LSTM and XGBoost models.
-    """
-    if len(historical_prices) < 60:
-        return None, None  # Need at least 60 data points
+# === Predict Next Price === #
+def predict_next_price(symbol):
+    historical = get_historical_prices(symbol)
+    
+    if not historical or len(historical) < 60:
+        return "❌ Not enough historical data available."
 
-    # Normalize prices
-    scaled_data = scaler.transform(np.array(historical_prices).reshape(-1, 1))
+    # Scale Data
+    historical_array = np.array(historical).reshape(-1, 1)
+    scaled_data = scaler.transform(historical_array)
 
-    # LSTM expects 3D input: (samples, timesteps, features)
-    lstm_input = np.array([scaled_data[-60:]]).reshape(1, 60, 1)
+    # Prepare LSTM Input
+    lstm_input = scaled_data.reshape(1, 60, 1)
 
-    # XGBoost expects 2D input: (samples, features)
-    xgb_input = scaled_data[-60:].flatten().reshape(1, -1)
+    # Prepare XGB Input
+    xgb_input = scaled_data.flatten().reshape(1, -1)
 
-    return lstm_input, xgb_input
-
-# 🔹 **Function to Predict Next Price**
-def predict_next_price(symbol, historical_prices):
-    """
-    Predicts the next price using both LSTM and XGBoost models.
-    """
-    lstm_input, xgb_input = preprocess_data(historical_prices)
-    if lstm_input is None or xgb_input is None:
-        return "⚠️ Not enough historical data (60+ data points required)."
-
-    # LSTM Prediction
+    # Predictions
     lstm_pred = lstm_model.predict(lstm_input)
-    lstm_price = scaler.inverse_transform(lstm_pred)[0][0]
-
-    # XGBoost Prediction
     xgb_pred = xgb_model.predict(xgb_input)
+
+    # Inverse Scale
+    lstm_price = scaler.inverse_transform(lstm_pred)[0][0]
     xgb_price = scaler.inverse_transform(xgb_pred.reshape(-1, 1))[0][0]
 
-    # Combine results
-    final_pred = (lstm_price + xgb_price) / 2
+    return f"📊 Predicted Price:\n🔹 LSTM: ${lstm_price:.2f}\n🔹 XGBoost: ${xgb_price:.2f}"
 
-    return {
-        "lstm_price": round(lstm_price, 2),
-        "xgb_price": round(xgb_price, 2),
-        "final_pred": round(final_pred, 2),
-    }
+# === Telegram Bot Commands === #
+async def start(update: Update, context: CallbackContext) -> None:
+    await update.message.reply_text("🤖 Welcome! Use /predict <coin_symbol> to get predictions.")
 
-# 🔹 **Telegram Bot Command for Prediction**
-def predict_command(update: Update, context: CallbackContext):
-    """
-    Telegram bot command to predict the next crypto price.
-    Usage: /predict bitcoin
-    """
-    if len(context.args) < 1:
-        update.message.reply_text("⚠️ Please provide a symbol! Example: /predict bitcoin")
+async def predict(update: Update, context: CallbackContext) -> None:
+    if len(context.args) == 0:
+        await update.message.reply_text("⚠️ Please provide a coin symbol. Example: /predict bitcoin")
         return
-
+    
     symbol = context.args[0].lower()
-    historical_prices = get_historical_prices(symbol)
+    result = predict_next_price(symbol)
+    await update.message.reply_text(result)
 
-    if historical_prices is None:
-        update.message.reply_text("⚠️ Failed to fetch historical data. Try again later.")
-        return
+# === Run Telegram Bot === #
+TOKEN = "7277532789:AAGS5v9K6if3ZrLen8fa2ABRovn25Sazpk8"
 
-    prediction = predict_next_price(symbol, historical_prices)
+app = ApplicationBuilder().token(TOKEN).build()
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("predict", predict))
 
-    if isinstance(prediction, str):
-        update.message.reply_text(prediction)
-    else:
-        response = (
-            f"📊 *Price Prediction for {symbol.upper()}* 📊\n"
-            f"🔹 *LSTM Model:* ${prediction['lstm_price']}\n"
-            f"🔹 *XGBoost Model:* ${prediction['xgb_price']}\n"
-            f"✨ *Final Prediction:* ${prediction['final_pred']}\n"
-        )
-        update.message.reply_text(response, parse_mode="Markdown")
-
-# 🔹 **Setup Telegram Bot**
-def main():
-    """
-    Main function to run the Telegram bot.
-    """
-    TOKEN = "7277532789:AAGS5v9K6if3ZrLen8fa2ABRovn25Sazpk8"  # 🔴 Replace with your bot token
-    updater = Updater(TOKEN, use_context=True)
-    dispatcher = updater.dispatcher
-
-    # Add command handlers
-    dispatcher.add_handler(CommandHandler("predict", predict_command))
-
-    # Start the bot
-    updater.start_polling()
-    updater.idle()
-
-if __name__ == "__main__":
-    main()
+print("🤖 Bot is running...")
+app.run_polling()
