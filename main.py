@@ -14,6 +14,10 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from telegram import Update
 from telegram.ext import Application, CommandHandler, CallbackContext
 
+# ================= SUPPRESSING UNNECESSARY LOGS =================
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Suppress most TensorFlow warnings
+tf.get_logger().setLevel('ERROR')  # Hide unnecessary logs
+
 # ================= INITIALIZATION =================
 logging.basicConfig(
     level=logging.INFO,
@@ -34,7 +38,10 @@ class Config:
 cfg = Config()
 
 # ================= SECURITY SETUP =================
-TELEGRAM_TOKEN = "7277532789:AAGS5v9K6if3ZrLen8fa2ABRovn25Sazpk8"
+TELEGRAM_TOKEN = '7277532789:AAGS5v9K6if3ZrLen8fa2ABRovn25Sazpk8'  # Hardcoded bot token
+if not TELEGRAM_TOKEN:
+    logger.critical("Missing TELEGRAM_BOT_TOKEN environment variable")
+    exit(1)
 
 # ================= MODEL MANAGEMENT =================
 class ModelLoader:
@@ -47,8 +54,8 @@ class ModelLoader:
             xgb_model.load_model("xgb_model.json")
             
             # Validate model compatibility
-            test_data = np.random.randn(cfg.MODEL_INPUT_SIZE).reshape(1, cfg.MODEL_INPUT_SIZE, 1)
-            lstm_model.predict(test_data)  # Fix: Reshaped correctly
+            test_data = np.random.randn(cfg.MODEL_INPUT_SIZE)
+            lstm_model.predict(test_data.reshape(1, cfg.MODEL_INPUT_SIZE, 1))
             xgb_model.predict(xgb.DMatrix(test_data.reshape(1, -1)))
             
             return lstm_model, xgb_model
@@ -111,7 +118,7 @@ class InputValidator:
         if np.any(prices <= 0):
             return False
         daily_returns = np.diff(prices) / prices[:-1]
-        if np.mean(np.abs(daily_returns)) > 1:  # Adjusted for higher volatility
+        if np.mean(np.abs(daily_returns)) > 0.5:  # 50% average daily change
             return False
         return True
 
@@ -133,7 +140,7 @@ class RateLimiter:
             requests.popleft()
             
         if len(requests) >= max_req:
-            return False  # Fix: Don't append if limit is reached
+            return False
             
         requests.append(now)
         return True
@@ -200,7 +207,7 @@ async def handle_prediction(update: Update, context: CallbackContext):
             f"• XGBoost Model: ${prediction['xgb']:.2f}\n"
             f"• Combined Prediction: ${prediction['combined']:.2f}"
         )
-        await update.message.reply_text(response_msg, parse_mode="MarkdownV2")  # Fix: Markdown V2
+        await update.message.reply_markdown(response_msg)
 
     except Exception as e:
         logger.error(f"Prediction failed for {user.id}: {traceback.format_exc()}")
