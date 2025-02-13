@@ -1,28 +1,27 @@
-name: Python CI with TA-Lib (MacOS)
+name: Run Telegram Bot
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: macos-latest
+  run-bot:
+    runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout Repository
         uses: actions/checkout@v3
 
-      - name: Set up Python
+      - name: Setup Python Environment
         uses: actions/setup-python@v4
         with:
-          python-version: "3.9"
+          python-version: "3.8"
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: |
-          brew install ta-lib
-          pip install --upgrade pip
-          pip install --no-cache-dir ta-lib -r requirements.txt
+          python -m pip install --upgrade pip
+          pip install numpy matplotlib requests joblib tensorflow xgboost scikit-learn python-telegram-bot
 
-      - name: Run Python script
-        run: python main.py  # Replace with your script name
+      - name: Run Telegram Bot
+        run: python main.py
